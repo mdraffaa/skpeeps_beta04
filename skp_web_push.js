@@ -3,7 +3,7 @@
 
   const INSTALLATION_KEY = 'skp_web_push_installation_id';
   const OPT_IN_KEY = 'skp_web_push_opted_in';
-  const SW_VERSION = 'restore-v6-20260821';
+  const SW_VERSION = 'single-worker-v7-20260821';
 
   function normalizeRoute(route) {
     const raw = String(route || '/notifications').trim();
@@ -97,29 +97,83 @@
     return id;
   }
 
+  let registrationPromise = null;
+
+  function workerScriptUrl(worker) {
+    try {
+      return worker?.scriptURL || '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function registrationUsesSkpWorker(registration) {
+    const urls = [
+      workerScriptUrl(registration?.active),
+      workerScriptUrl(registration?.waiting),
+      workerScriptUrl(registration?.installing),
+    ];
+    return urls.some((url) => url.includes('/skp-push-sw.js'));
+  }
+
+  async function waitForSkpWorker(registration) {
+    if (registrationUsesSkpWorker(registration)) return registration;
+
+    const worker = registration.installing || registration.waiting;
+    if (!worker) return registration;
+
+    await new Promise((resolve) => {
+      const timeout = setTimeout(resolve, 4000);
+      const onState = () => {
+        if (worker.state === 'activated' || worker.state === 'redundant') {
+          clearTimeout(timeout);
+          worker.removeEventListener('statechange', onState);
+          resolve();
+        }
+      };
+      worker.addEventListener('statechange', onState);
+      onState();
+    });
+    return registration;
+  }
+
   async function ensureRegistration() {
     if (!isSupported()) throw new Error('WEB_PUSH_UNSUPPORTED');
+    if (registrationPromise) return registrationPromise;
 
-    const scope = baseScopePath();
+    registrationPromise = (async () => {
+      const scope = baseScopePath();
+      const existing = await navigator.serviceWorker.getRegistration(scope);
 
-    // Always call register with the versioned script URL. register() is cheap
-    // for an unchanged worker and guarantees an old notificationclick handler
-    // does not live forever in an installed PWA.
-    const registration = await navigator.serviceWorker.register(
-      serviceWorkerUrl(),
-      {
-        scope,
-        updateViaCache: 'none',
-      },
-    );
+      // flutter_service_worker.js used to own this same scope. Registering the
+      // SKP worker on the SAME registration upgrades it without deleting the
+      // PushSubscription. A custom Flutter bootstrap now prevents Flutter from
+      // replacing it again on the next load.
+      if (existing && !registrationUsesSkpWorker(existing)) {
+        console.info(
+          '[SKP Web Push] replacing conflicting root worker:',
+          workerScriptUrl(existing.active) || workerScriptUrl(existing.waiting),
+        );
+      }
+
+      const registration = await navigator.serviceWorker.register(
+        serviceWorkerUrl(),
+        {
+          scope,
+          updateViaCache: 'none',
+        },
+      );
+
+      await waitForSkpWorker(registration);
+      return registration;
+    })();
 
     try {
-      await registration.update();
+      return await registrationPromise;
     } catch (error) {
-      console.debug('[SKP Web Push] SW update check skipped:', error);
+      registrationPromise = null;
+      throw error;
     }
-
-    return navigator.serviceWorker.ready;
   }
 
   function urlBase64ToUint8Array(base64String) {
@@ -261,6 +315,14 @@
     }
   }
 
+  // Called by our custom flutter_bootstrap.js before Flutter starts. This is
+  // the migration barrier that stops flutter_service_worker.js and
+  // skp-push-sw.js from racing for the same root scope on every refresh.
+  async function prepareForFlutterBoot() {
+    if (!isSupported()) return;
+    await ensureRegistration();
+  }
+
   // Fast path for an already-open PWA. The worker also performs a navigation
   // fallback, so even if this message arrives while Flutter is busy the click
   // cannot be silently lost.
@@ -284,6 +346,7 @@
     subscribeJson,
     unsubscribeJson,
     preRegister,
+    prepareForFlutterBoot,
     swVersion: SW_VERSION,
   };
 

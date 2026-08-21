@@ -35,8 +35,20 @@ if (!window._flutter) {
 }
 _flutter.buildConfig = {"engineRevision":"69c8c61792f04cc809dfef0c910414fb9afc06cd","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
 
-_flutter.loader.load({
-  serviceWorkerSettings: {
-    serviceWorkerVersion: "664530255" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
+
+// SK Peeps uses one root-scope service worker: skp-push-sw.js.
+// Do not pass Flutter serviceWorkerSettings here, otherwise Flutter's generated
+// flutter_service_worker.js and the Web Push worker continuously replace each
+// other on the same scope after refresh.
+(async () => {
+  try {
+    if (window.SKPWebPush?.prepareForFlutterBoot) {
+      await window.SKPWebPush.prepareForFlutterBoot();
+    }
+  } catch (error) {
+    // Never block the app from starting just because SW migration/check failed.
+    console.warn('[SKP bootstrap] push worker preparation skipped:', error);
   }
-});
+
+  _flutter.loader.load();
+})();
