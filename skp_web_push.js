@@ -3,7 +3,7 @@
 
   const INSTALLATION_KEY = 'skp_web_push_installation_id';
   const OPT_IN_KEY = 'skp_web_push_opted_in';
-  const SW_VERSION = 'single-worker-v7-20260821';
+  const SW_VERSION = 'mention-v8-20260824';
 
   function normalizeRoute(route) {
     const raw = String(route || '/notifications').trim();

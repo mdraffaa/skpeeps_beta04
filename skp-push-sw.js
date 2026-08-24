@@ -3,7 +3,7 @@
 // Bump this whenever notification click/navigation behavior changes. The page
 // registers this file with ?v=<version>, forcing Chrome/Edge/iOS PWA to pick up
 // the new worker instead of silently continuing to use an old click handler.
-const SKP_SW_VERSION = 'persist-v5-20260821';
+const SKP_SW_VERSION = 'mention-v6-20260824';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => {
@@ -58,9 +58,13 @@ function routeForData(data) {
   const postId = String(data.postId || '');
   const uid = String(data.uid || '');
   const chatId = String(data.chatId || '');
+  const messageId = String(data.messageId || '');
+  const messageQuery = messageId
+    ? `?message=${encodeURIComponent(messageId)}`
+    : '';
 
-  if (type === 'groupChat' && chatId) return `/group/${chatId}`;
-  if (type === 'chat' && uid) return `/chat/${uid}`;
+  if (type === 'groupChat' && chatId) return `/group/${chatId}${messageQuery}`;
+  if (type === 'chat' && uid) return `/chat/${uid}${messageQuery}`;
   if (type === 'profileVisit' && uid) return `/profile/${uid}`;
   if (postId) return `/post/${postId}`;
   return '/notifications';
